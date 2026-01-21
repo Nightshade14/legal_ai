@@ -40,41 +40,37 @@ Persona and capabilities: You are a legal advisor and an expert in law and contr
 def analyze_contract[T: BaseModel](
     llm_client: OpenAI, text: str, validation_schema: type[T]
 ) -> None | T:
-    schema_definition: str = json.dumps(
-        obj=validation_schema.model_json_schema(), indent=2
-    )
+    ai_model = os.environ["AI_MODEL"]
+    schema_definition = json.dumps(validation_schema.model_json_schema(), indent=2)
     final_system_prompt = f"""
-        {base_system_prompt}
+    ### INSTRUCTIONS
+    {base_system_prompt}
 
-        ### REQUIRED OUTPUT SCHEMA:
-        {schema_definition}
-        """
+    ### JSON OUTPUT STRUCTURE FORMAT
+    {schema_definition}
+    """
     print("Sending message to Gemini...")
-    response = llm_client.chat.completions.create(
-        model=os.environ.get("AI_MODEL"),
+    response = llm_client.chat.completions.parse(
+        model=ai_model,
         messages=[
             {"role": "system", "content": final_system_prompt},
             {"role": "user", "content": f"Analyze this clause: {text}"},
         ],
-        response_format={"type": "json_object"},
+        response_format=validation_schema,
     )
 
     try:
-        raw_content = response.choices[0].message.content
-        data: dict = dict()
-        if raw_content is not None:
-            data = json.loads(raw_content)
-
-        if "properties" in data and "title" in data:
-            print("Model failed: It just returned the schema definition.")
+        parsed_obj = response.choices[0].message.parsed
+        
+        if parsed_obj:
+            return parsed_obj
+        else:
+            print("Model generated response with invalid structure.")
             return None
 
-        validated_object = validation_schema(**data)
-        return validated_object
-
     except Exception as e:
-        print(f"Parsing Error: {e}")
-        rich.print(response.choices[0].message.content)
+        print(f"Agent Error: {e}")
+        return None
 
 
 if __name__ == "__main__":
